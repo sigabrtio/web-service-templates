@@ -1,0 +1,3 @@
+scala-finatra/tasks-backend/.idea*
+scala-finatra/tasks-backend/*/build*
+scala-finatra/tasks-backend/.gradle*
