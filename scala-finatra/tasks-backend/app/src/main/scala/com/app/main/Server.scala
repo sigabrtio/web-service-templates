@@ -1,6 +1,6 @@
 package com.app.main
 
-import com.app.controllers.{ErrorController, GetTaskController, ListTasksController, NewTaskController, NotFoundExceptionMapper, UpdateTaskController}
+import com.app.controllers.{ErrorController, GetTaskController, InvalidInputExceptionMapper, ListTasksController, NewTaskController, NotFoundExceptionMapper, UpdateTaskController}
 import com.app.modules.{ControllerModule, ErrorModule}
 import com.google.inject
 import com.twitter.finagle.http.{Request, Response}
@@ -26,6 +26,7 @@ class Server extends HttpServer {
       .add[UpdateTaskController]
       .add[ErrorController]
       .exceptionMapper[NotFoundExceptionMapper]
+      .exceptionMapper[InvalidInputExceptionMapper]
   }
 
   //

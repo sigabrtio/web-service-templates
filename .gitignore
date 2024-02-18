@@ -1,3 +1,4 @@
 scala-finatra/tasks-backend/.idea*
 scala-finatra/tasks-backend/*/build*
 scala-finatra/tasks-backend/.gradle*
+python-django/tasks_backend/tasks_backend/__pycache__/

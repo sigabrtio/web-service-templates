@@ -7,3 +7,5 @@ CREATE TABLE tasks(
 
     PRIMARY KEY (userid,id)
 );
+
+CREATE INDEX tasks_user_id_idx ON tasks (userid);

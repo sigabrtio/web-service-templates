@@ -1,9 +1,9 @@
 package com.app.controllers
 
-import com.app.models.{Task, TaskStatusEntry}
+import com.app.models.{Task, TaskMetadata}
 import com.app.repository.TasksRepository
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.twitter.finagle.http.{Request, Response, Status}
+import com.twitter.finagle.http.{Response, Status}
 import com.twitter.finatra.http.Controller
 import com.twitter.finatra.http.annotations.{Header, RouteParam}
 import com.twitter.finatra.jackson.modules.ScalaObjectMapperModule
@@ -16,7 +16,7 @@ case class GetTaskRequest(
 
 case class GetTaskResponse(
   @JsonProperty("task") task: Task,
-  @JsonProperty("status-history") statusHistory: Seq[TaskStatusEntry]
+  @JsonProperty("metadata") taskMetadata: Seq[TaskMetadata]
 )
 
 class GetTaskController(tasksRepository: TasksRepository) extends Controller  {
@@ -28,15 +28,15 @@ class GetTaskController(tasksRepository: TasksRepository) extends Controller  {
           userId = userId,
           id = request.taskId
         ).flatMap {
-          case Some(task) => tasksRepository.getTaskStatusHistory(
+          case Some(task) => tasksRepository.getAllTaskMetadata(
               userId = userId,
               taskId = task.id
-            ).map { statusHistory =>
+            ).map { tasksMetadata =>
               val resp = Response(Status.Ok).content(
                 objectMapper.writeValueAsBuf(
                   GetTaskResponse(
                     task = task,
-                    statusHistory = statusHistory
+                    taskMetadata = tasksMetadata
                   )
                 )
               )

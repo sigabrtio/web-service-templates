@@ -1,9 +1,10 @@
 package com.app.repository
 
-import com.app.models.{Task, TaskStatus, TaskStatusEntry}
-import com.twitter.util.{Future, FuturePool}
+import com.app.models.{Task, TaskMetadata, TaskStatus}
+import com.twitter.util.{Future, FuturePool, Try}
+import org.joda.time.DateTime
 
-import java.sql.Connection
+import java.sql.{Connection, Types}
 import java.util.UUID
 
 trait TasksRepository {
@@ -11,18 +12,20 @@ trait TasksRepository {
 
   def listTasks(userId: String): Future[Seq[String]]
 
-  def getTaskStatusHistory(userId: String, taskId: String): Future[Seq[TaskStatusEntry]]
+  def getAllTaskMetadata(userId: String, taskId: String): Future[Seq[TaskMetadata]]
 
   def insertTask(userId: String, task: Task): Future[String]
 
   def updateTask(userId: String, task: Task): Future[Unit]
 
-  def updateTaskStatusHistory(userId: String, taskId: String, newStatus: String): Future[Unit]
+  def insertTaskMetadata(userId: String, taskId: String, metadata: TaskMetadata): Future[Long]
+
+  def deleteMetadata(userId: String, taskId: String, metadataId: Long): Future[Unit]
 }
 
 class TasksRepositoryJdbc(val conn: Connection) extends TasksRepository {
   private val TasksTable = "tasks";
-  private val TaskStatusHistoryTable = "task_status_history"
+  private val TaskMetadataTable = "task_metadata"
   override def getTask(userId: String, id: String): Future[Option[Task]] = {
     FuturePool.unboundedPool {
       val statement = conn.prepareStatement(
@@ -67,13 +70,23 @@ class TasksRepositoryJdbc(val conn: Connection) extends TasksRepository {
     }
   }
 
-  override def getTaskStatusHistory(userId: String, taskId: String): Future[Seq[TaskStatusEntry]] = {
-    var statuses = Seq[TaskStatusEntry]()
+  override def getAllTaskMetadata(userId: String, taskId: String): Future[Seq[TaskMetadata]] = {
+    var statuses = Seq[TaskMetadata]()
     FuturePool.unboundedPool {
       val statement = conn.prepareStatement(
         s"""
            |
-           |SELECT status FROM $TaskStatusHistoryTable WHERE user_id=? AND task_id=?;
+           |SELECT
+           |  id,
+           |  metadata_name,
+           |  metadata_type,
+           |  create_time,
+           |  metadata_long_value,
+           |  metadata_double_value,
+           |  metadata_short_text_value,
+           |  metadata_uuid_value,
+           |  metadata_boolean_value
+           |FROM $TaskMetadataTable WHERE user_id=? AND task_id=?;
            |
            |""".stripMargin
       )
@@ -81,7 +94,17 @@ class TasksRepositoryJdbc(val conn: Connection) extends TasksRepository {
       statement.setString(2, taskId)
       val results = statement.executeQuery()
       while (results.next()) {
-        statuses = statuses :+ TaskStatusEntry(status = results.getString(1))
+        statuses = statuses :+ TaskMetadata(
+          id = results.getLong("id"),
+          metadataName = results.getString("metadata_name"),
+          metadataType = results.getString("metadata_type"),
+          createDate = Some(new DateTime(results.getDate("create_time"))),
+          longValue = Option(results.getLong("metadata_long_value")),
+          doubleValue = Option(results.getDouble("metadata_double_value")),
+          shortStringValue = Option(results.getString("metadata_short_text_value")),
+          uuidValue = Option(results.getString("metadata_uuid_value")).map(UUID.fromString),
+          booleanValue = Option(results.getBoolean("metadata_boolean_value"))
+        )
       }
       statuses
     }
@@ -97,8 +120,8 @@ class TasksRepositoryJdbc(val conn: Connection) extends TasksRepository {
            |INSERT INTO $TasksTable (userid,id,description,status) VALUES
            |  (?,?,?,?);
            |
-           |INSERT INTO $TaskStatusHistoryTable (user_id,task_id,status) VALUES
-           |  (?,?,?);
+           |INSERT INTO $TaskMetadataTable (user_id,task_id,metadata_name,metadata_type,short_text_value) VALUES
+           |  (?,?,?, ?,?);
            |
            |END;
            |""".stripMargin
@@ -110,7 +133,9 @@ class TasksRepositoryJdbc(val conn: Connection) extends TasksRepository {
 
       statement.setString(5, userId)
       statement.setString(6, task.id)
-      statement.setString(7, TaskStatus.Created)
+      statement.setString(7, TaskStatus.MetadataName)
+      statement.setString(8, TaskStatus.MetadataType)
+      statement.setString(9, TaskStatus.Created)
 
       statement.execute()
       taskId
@@ -135,18 +160,56 @@ class TasksRepositoryJdbc(val conn: Connection) extends TasksRepository {
     }
   }
 
-  override def updateTaskStatusHistory(userId: String, taskId: String, newStatus: String): Future[Unit] = {
+  override def insertTaskMetadata(userId: String, taskId: String, metadata: TaskMetadata): Future[Long] = {
     FuturePool.unboundedPool {
       val statement = conn.prepareStatement(
         s"""
            |
-           |INSERT INTO $TaskStatusHistoryTable (user_id,task_id,status) VALUES
-           |  (?, ?, ?)
+           |INSERT INTO $TaskMetadataTable (
+           |  user_id,
+           |  task_id,
+           |  metadata_name,
+           |  metadata_type,
+           |  metadata_long_value,
+           |  metadata_double_value,
+           |  metadata_short_text_value,
+           |  metadata_uuid_value,
+           |  metadata_boolean_value)
+           |VALUES
+           |  (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           |RETURNING id;
            |""".stripMargin
       )
       statement.setString(1, userId)
-      statement.setString(2,taskId)
-      statement.setString(3, newStatus)
+      statement.setString(2, taskId)
+      statement.setString(3, metadata.metadataName)
+      statement.setString(4,metadata.metadataType)
+
+      metadata.longValue.map(statement.setLong(5, _)).getOrElse(statement.setNull(5, Types.BIGINT))
+      metadata.doubleValue.map(statement.setDouble(6, _)).getOrElse(statement.setNull(6, Types.DOUBLE))
+      metadata.shortStringValue.map(statement.setString(7, _)).getOrElse(statement.setNull(7, Types.VARCHAR))
+      metadata.uuidValue.map { uuid => statement.setString(8, f"${uuid}::uuid")}.getOrElse(statement.setNull(8, Types.OTHER))
+      metadata.booleanValue.map(statement.setBoolean(9, _)).getOrElse(statement.setNull(9, Types.BOOLEAN))
+
+      val res = statement.executeQuery()
+      res.next()
+      res.getLong("id")
+    }
+  }
+
+  override def deleteMetadata(userId: String, taskId: String, metadataId: Long): Future[Unit] = {
+    FuturePool.unboundedPool {
+      val statement = conn.prepareStatement(
+        s"""
+           |DELETE FROM $TaskMetadataTable WHERE
+           | id=? AND user_id=? AND task_id=?
+           |""".stripMargin
+      )
+
+      statement.setLong(1, metadataId)
+      statement.setString(2, userId)
+      statement.setString(3, taskId)
+
       statement.execute()
     }
   }
